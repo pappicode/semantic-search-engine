@@ -7,7 +7,7 @@ export async function generateAnswer(query: string, contextChunks: string[]): Pr
   const apiKey = process.env.GEMINI_API_KEY?.trim();
 
   if (!apiKey) {
-    return "Error: GEMINI_API_KEY is not configured in .env.local. Please add it and restart your dev server.";
+    return "Error: GEMINI_API_KEY is not configured in .env.local / Vercel Environment Variables.";
   }
 
   if (!query.trim() || contextChunks.length === 0) {
@@ -35,27 +35,41 @@ Context Excerpts:
 ${contextText}
 `;
 
-  // Fallback model list: Tries models in sequential order
+  // Standard verified Gemini Flash & Pro model endpoints
   const modelsToTry = [
-    "gemini-3.8-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
+    "gemini-1.5-pro",
   ];
 
-  for (const model of modelsToTry) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-      });
+  let lastErrorDetail = "";
 
-      if (response.text) {
-        return response.text;
+  for (const model of modelsToTry) {
+    // Retry up to 2 times per model with a brief delay for transient 503/429 spikes
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
+
+        if (response.text) {
+          return response.text;
+        }
+      } catch (error: any) {
+        lastErrorDetail = error.message || String(error);
+        console.warn(`[Gemini RAG] Attempt ${attempt} failed for ${model}:`, lastErrorDetail);
+
+        // If high demand (503) or rate limit (429), pause 1 second before retrying
+        if (lastErrorDetail.includes("503") || lastErrorDetail.includes("429") || lastErrorDetail.includes("UNAVAILABLE")) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } else {
+          // If 404 or non-transient, skip to next model
+          break;
+        }
       }
-    } catch (error: any) {
-      console.warn(`Model ${model} failed (${error.status || "Error"}). Trying next fallback...`);
     }
   }
 
-  return "All model endpoints are currently experiencing high demand (503) or rate limits. Please try again in a few seconds.";
+  return `Gemini API Temporary Error: ${lastErrorDetail || "High demand on Google AI servers"}. Please click "Synthesize AI Answer" again in a few seconds.`;
 }
