@@ -105,7 +105,14 @@ export default function DocumentSearchApp() {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || !worker.current) return;
+    if (!files || files.length === 0) return;
+
+    if (!isReady) {
+      alert("Embedding engine is still initializing in the background. Please wait a few seconds and try uploading again.");
+      return;
+    }
+
+    if (!worker.current) return;
 
     setIsProcessing(true);
     setStatus("Parsing document text...");
@@ -194,7 +201,7 @@ export default function DocumentSearchApp() {
           type="file"
           accept=".pdf,.txt,.md,.json,.js,.py"
           onChange={handleFileUpload}
-          disabled={!isReady || isProcessing}
+          disabled={isProcessing}
           className="hidden"
           id="file-upload"
         />

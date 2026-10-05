@@ -35,15 +35,27 @@ Context Excerpts:
 ${contextText}
 `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash", // Updated to recommended model endpoint
-      contents: prompt,
-    });
+  // Fallback model list: Tries models in sequential order
+  const modelsToTry = [
+    "gemini-3.8-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+  ];
 
-    return response.text || "No response generated.";
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    return `API Error: ${error.message || "Failed to call Gemini API"}. Ensure your key in .env.local is correct and restart 'npm run dev'.`;
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+
+      if (response.text) {
+        return response.text;
+      }
+    } catch (error: any) {
+      console.warn(`Model ${model} failed (${error.status || "Error"}). Trying next fallback...`);
+    }
   }
+
+  return "All model endpoints are currently experiencing high demand (503) or rate limits. Please try again in a few seconds.";
 }
