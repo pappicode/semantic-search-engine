@@ -1,5 +1,5 @@
 // app/worker.ts
-import { pipeline, env } from "@huggingface/transformers";
+import { pipeline, env, type ProgressCallback } from "@huggingface/transformers";
 
 // Disable local model searches and enable browser caching
 env.allowLocalModels = false;
@@ -10,7 +10,7 @@ class PipelineSingleton {
   static model = "Xenova/all-MiniLM-L6-v2";
   static instance: any = null;
 
-  static async getInstance(progress_callback?: Function) {
+  static async getInstance(progress_callback?: ProgressCallback) {
     if (this.instance === null) {
       this.instance = await pipeline(this.task, this.model, {
         progress_callback,
