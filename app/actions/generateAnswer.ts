@@ -12,6 +12,10 @@ export async function generateAnswer(query: string, contextChunks: string[]): Pr
     return "No matching document excerpts found for this query.";
   }
 
+  if (!geminiKey && !groqKey) {
+    return "Error: No API keys configured in environment.";
+  }
+
   const contextText = contextChunks
     .map((chunk, idx) => `[EXCERPT ${idx + 1}]:\n${chunk}`)
     .join("\n\n");
@@ -31,10 +35,12 @@ Context Excerpts:
 ${contextText}
 `;
 
-  // 1. Try Primary Provider: Gemini
+  const errors: string[] = [];
+
+  // 1. Try Gemini (gemini-3.8-flash)
   if (geminiKey) {
     const ai = new GoogleGenAI({ apiKey: geminiKey });
-    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
+    const geminiModels = ["gemini-3.8-flash"];
 
     for (const model of geminiModels) {
       try {
@@ -44,25 +50,37 @@ ${contextText}
         });
         if (response.text) return response.text;
       } catch (err: any) {
-        console.warn(`[Gemini] ${model} failed, attempting next...`, err.message || err);
+        const msg = err.message || String(err);
+        console.error(`[Gemini - ${model} Error]:`, msg);
+        errors.push(`Gemini (${model}): ${msg}`);
       }
     }
+  } else {
+    errors.push("Gemini: GEMINI_API_KEY missing");
   }
 
-  // 2. Fallback Provider: Groq (Llama 3.3 70B)
+  // 2. Try Groq (llama-3.1-8b-instant / llama3-70b-8192)
   if (groqKey) {
-    try {
-      const groq = new Groq({ apiKey: groqKey });
-      const completion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-      });
-      const response = completion.choices[0]?.message?.content;
-      if (response) return response;
-    } catch (groqErr: any) {
-      console.error("[Groq Fallback Failed]:", groqErr.message || groqErr);
+    const groq = new Groq({ apiKey: groqKey });
+    const groqModels = ["llama-3.1-8b-instant", "llama3-70b-8192"];
+
+    for (const model of groqModels) {
+      try {
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model,
+        });
+        const response = completion.choices[0]?.message?.content;
+        if (response) return response;
+      } catch (gErr: any) {
+        const msg = gErr.message || String(gErr);
+        console.error(`[Groq - ${model} Error]:`, msg);
+        errors.push(`Groq (${model}): ${msg}`);
+      }
     }
+  } else {
+    errors.push("Groq: GROQ_API_KEY missing");
   }
 
-  return "AI services are temporarily overloaded. Please try again in a few seconds.";
+  return `AI Generation Failed.\n\nDiagnostic Info:\n${errors.map((e) => `• ${e}`).join("\n")}`;
 }
