@@ -2,19 +2,15 @@
 "use server";
 
 import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 
 export async function generateAnswer(query: string, contextChunks: string[]): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-
-  if (!apiKey) {
-    return "Error: GEMINI_API_KEY is not configured in .env.local / Vercel Environment Variables.";
-  }
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const groqKey = process.env.GROQ_API_KEY?.trim();
 
   if (!query.trim() || contextChunks.length === 0) {
     return "No matching document excerpts found for this query.";
   }
-
-  const ai = new GoogleGenAI({ apiKey });
 
   const contextText = contextChunks
     .map((chunk, idx) => `[EXCERPT ${idx + 1}]:\n${chunk}`)
@@ -35,41 +31,38 @@ Context Excerpts:
 ${contextText}
 `;
 
-  // Standard verified Gemini Flash & Pro model endpoints
-  const modelsToTry = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-  ];
+  // 1. Try Primary Provider: Gemini
+  if (geminiKey) {
+    const ai = new GoogleGenAI({ apiKey: geminiKey });
+    const geminiModels = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
-  let lastErrorDetail = "";
-
-  for (const model of modelsToTry) {
-    // Retry up to 2 times per model with a brief delay for transient 503/429 spikes
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (const model of geminiModels) {
       try {
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
         });
-
-        if (response.text) {
-          return response.text;
-        }
-      } catch (error: any) {
-        lastErrorDetail = error.message || String(error);
-        console.warn(`[Gemini RAG] Attempt ${attempt} failed for ${model}:`, lastErrorDetail);
-
-        // If high demand (503) or rate limit (429), pause 1 second before retrying
-        if (lastErrorDetail.includes("503") || lastErrorDetail.includes("429") || lastErrorDetail.includes("UNAVAILABLE")) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } else {
-          // If 404 or non-transient, skip to next model
-          break;
-        }
+        if (response.text) return response.text;
+      } catch (err: any) {
+        console.warn(`[Gemini] ${model} failed, attempting next...`, err.message || err);
       }
     }
   }
 
-  return `Gemini API Temporary Error: ${lastErrorDetail || "High demand on Google AI servers"}. Please click "Synthesize AI Answer" again in a few seconds.`;
+  // 2. Fallback Provider: Groq (Llama 3.3 70B)
+  if (groqKey) {
+    try {
+      const groq = new Groq({ apiKey: groqKey });
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+      });
+      const response = completion.choices[0]?.message?.content;
+      if (response) return response;
+    } catch (groqErr: any) {
+      console.error("[Groq Fallback Failed]:", groqErr.message || groqErr);
+    }
+  }
+
+  return "AI services are temporarily overloaded. Please try again in a few seconds.";
 }
